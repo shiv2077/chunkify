@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chunkify — focused study playlists</title>
+<meta name="description" content="Turn long YouTube videos into short, finishable study sections.">
+<meta name="theme-color" content="#0b0b10">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="header-inner">
+    <a class="brand" href="#" id="brand-link">
+      <span class="brand-mark"></span>
+      <span class="brand-text">
+        <span class="brand-name">Chunkify</span>
+        <span class="brand-tag">long videos &rarr; finishable study sections</span>
+      </span>
+    </a>
+
+    <div class="header-right">
+      <div class="today-stat" id="today-stat" title="Today's focused time">
+        <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="ring-bg" cx="18" cy="18" r="15.9155"></circle>
+          <circle class="ring-fill" id="goal-ring" cx="18" cy="18" r="15.9155" stroke-dasharray="0 100"></circle>
+        </svg>
+        <span class="today-nums">
+          <b id="today-minutes">0m</b>
+          <small id="today-goal">of 60m today</small>
+        </span>
+        <span class="streak" id="streak-badge" title="Day streak">&#128293; <b id="streak-count">0</b></span>
+      </div>
+      <button id="settings-btn" class="icon-btn big" title="Settings">&#9881;</button>
+    </div>
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- LIBRARY VIEW -->
+  <section id="library-view">
+    <form id="add-form" class="add-form">
+      <input id="url-input" type="text" placeholder="Paste a YouTube URL — watch, youtu.be, embed or shorts" autocomplete="off" spellcheck="false">
+      <button type="submit">Add video</button>
+    </form>
+    <p id="url-error" class="error hidden"></p>
+
+    <div class="library-head">
+      <h2>Your library</h2>
+      <p id="library-summary" class="hint"></p>
+    </div>
+
+    <div id="library-list" class="library-list"></div>
+    <div id="library-empty" class="empty-state hidden">
+      <p class="empty-title">Nothing to study yet</p>
+      <p class="hint">Paste a YouTube URL above. Chunkify splits it into short sections you can actually finish, tracks what you've completed, and nudges you to take breaks.</p>
+    </div>
+  </section>
+
+  <!-- VIDEO / PLAYER VIEW -->
+  <section id="video-view" class="hidden">
+    <button id="back-btn" class="link-btn">&larr; Library</button>
+    <h2 id="video-title"></h2>
+
+    <div id="resume-banner" class="resume-banner hidden">
+      <span id="resume-text"></span>
+      <button id="resume-btn">Resume</button>
+      <button id="dismiss-resume-btn" class="secondary">Start over</button>
+    </div>
+
+    <div class="video-columns">
+      <div class="video-main">
+        <div id="player-wrap">
+          <div id="player"></div>
+          <div id="break-overlay" class="break-overlay hidden">
+            <p class="break-kicker">Break time</p>
+            <p class="break-count" id="break-count">60</p>
+            <p class="break-msg">Look away from the screen. Roll your shoulders. Breathe.</p>
+            <div class="break-actions">
+              <button id="break-skip">Skip break</button>
+              <button id="break-end" class="secondary">End session</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="player-controls" class="player-controls hidden">
+          <button id="prev-btn" class="secondary" title="Previous section (&larr;)">&#9198;</button>
+          <button id="next-btn" class="secondary" title="Next section (&rarr;)">&#9197;</button>
+          <button id="complete-btn" title="Mark current section done (C)">&#10003; Done</button>
+          <button id="mark-chapter-btn" class="secondary" title="Split here">&#9998; Mark</button>
+          <select id="speed-select" title="Playback speed">
+            <option value="1">1&times;</option>
+            <option value="1.25">1.25&times;</option>
+            <option value="1.5">1.5&times;</option>
+            <option value="1.75">1.75&times;</option>
+            <option value="2">2&times;</option>
+          </select>
+        </div>
+
+        <div id="chunk-setup" class="chunk-setup hidden">
+          <h3>Set up sections</h3>
+          <p id="autodetect-hint" class="hint hidden"></p>
+
+          <div class="setup-block">
+            <label for="timestamps-input">Paste timestamps, one per line</label>
+            <textarea id="timestamps-input" rows="6" spellcheck="false" placeholder="0:00 Intro&#10;5:23 Setup&#10;1:08:25 Troubleshooting"></textarea>
+            <button id="create-from-timestamps-btn">Create sections</button>
+            <p id="timestamps-error" class="error hidden"></p>
+          </div>
+
+          <div class="setup-block">
+            <label for="autosplit-select">Or auto-split into equal sections</label>
+            <div class="autosplit-row">
+              <select id="autosplit-select">
+                <option value="10">10 min</option>
+                <option value="15">15 min</option>
+                <option value="20">20 min</option>
+                <option value="30">30 min</option>
+                <option value="custom">Custom</option>
+              </select>
+              <input id="autosplit-custom" type="number" min="1" placeholder="minutes" class="hidden">
+              <button id="autosplit-btn" disabled>Auto-split</button>
+            </div>
+            <p id="autosplit-hint" class="hint">Loading duration&hellip;</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="video-side">
+        <div class="side-progress" id="side-progress"></div>
+        <div class="chunk-list-header">
+          <p id="chunk-source-note" class="hint hidden"></p>
+          <button id="redo-setup-btn" class="link-btn hidden">Redo setup</button>
+        </div>
+        <div id="chunk-list" class="chunk-list"></div>
+        <p class="shortcut-hint">&larr; &rarr; prev/next &middot; <kbd>space</kbd> play &middot; <kbd>c</kbd> done</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- SETTINGS -->
+<dialog id="settings-dialog">
+  <form method="dialog" class="settings-form">
+    <h3>Settings</h3>
+
+    <label class="field">
+      <span>Daily focus goal (minutes)</span>
+      <input id="set-goal" type="number" min="5" step="5">
+    </label>
+
+    <label class="row-toggle">
+      <input id="set-breaks" type="checkbox">
+      <span>Break reminders between sections</span>
+    </label>
+
+    <div class="field-row">
+      <label class="field">
+        <span>Break every N sections</span>
+        <input id="set-break-every" type="number" min="1">
+      </label>
+      <label class="field">
+        <span>Break length (seconds)</span>
+        <input id="set-break-seconds" type="number" min="10" step="10">
+      </label>
+    </div>
+
+    <label class="row-toggle">
+      <input id="set-autocomplete" type="checkbox">
+      <span>Mark a section done when it finishes playing</span>
+    </label>
+
+    <label class="field">
+      <span>YouTube Data API key <small>(optional — auto-detects chapters from the description)</small></span>
+      <input id="set-api-key" type="text" placeholder="AIza…" autocomplete="off" spellcheck="false">
+    </label>
+
+    <div class="settings-actions">
+      <button type="button" id="settings-cancel" class="secondary">Cancel</button>
+      <button id="settings-save" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js" defer></script>
+<!-- self-check for the parsing/chunking logic; only runs at index.html#test -->
+<script src="test.js" defer></script>
+</body>
+</html>
