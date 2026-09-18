@@ -36,6 +36,7 @@
         </span>
         <span class="streak" id="streak-badge" title="Day streak">&#128293; <b id="streak-count">0</b></span>
       </div>
+      <button id="calibration-btn" class="icon-btn big" title="Calibration: predicted vs observed difficulty">&#128202;</button>
       <button id="settings-btn" class="icon-btn big" title="Settings">&#9881;</button>
     </div>
   </div>
@@ -50,6 +51,14 @@
       <button type="submit">Add video</button>
     </form>
     <p id="url-error" class="error hidden"></p>
+
+    <div id="review-panel" class="review-panel hidden">
+      <div class="library-head">
+        <h2>Due for review</h2>
+        <p id="review-summary" class="hint"></p>
+      </div>
+      <div id="review-list" class="review-list"></div>
+    </div>
 
     <div class="library-head">
       <h2>Your library</h2>
@@ -86,6 +95,29 @@
               <button id="break-skip">Skip break</button>
               <button id="break-end" class="secondary">End session</button>
             </div>
+          </div>
+          <div id="recall-overlay" class="break-overlay hidden">
+            <p class="break-kicker">Recall check</p>
+            <p class="recall-q" id="recall-q">What do you remember from that section?</p>
+            <p class="break-msg">Answer out loud before you rate it. Retrieving beats rewatching.</p>
+            <div id="recall-answer-block" class="recall-answer hidden">
+              <textarea id="recall-answer" rows="3" placeholder="Type what you remember, then grade it…" spellcheck="false"></textarea>
+              <div class="recall-answer-actions">
+                <button type="button" id="recall-grade" class="secondary">Grade my answer</button>
+                <span id="recall-grade-status" class="cards-status"></span>
+              </div>
+              <div id="recall-suggestion" class="recall-suggestion hidden">
+                <p id="recall-suggestion-text"></p>
+                <button type="button" id="recall-accept">Accept</button>
+              </div>
+            </div>
+
+            <div class="break-actions recall-actions">
+              <button id="recall-3" class="recall-good">1 &middot; Got it</button>
+              <button id="recall-2" class="recall-ok">2 &middot; Shaky</button>
+              <button id="recall-1" class="recall-bad">3 &middot; Lost it</button>
+            </div>
+            <button id="recall-skip" class="link-btn">Skip &mdash; don't schedule a review</button>
           </div>
         </div>
 
@@ -139,7 +171,7 @@
           <button id="redo-setup-btn" class="link-btn hidden">Redo setup</button>
         </div>
         <div id="chunk-list" class="chunk-list"></div>
-        <p class="shortcut-hint">&larr; &rarr; prev/next &middot; <kbd>space</kbd> play &middot; <kbd>c</kbd> done</p>
+        <p class="shortcut-hint">&larr; &rarr; prev/next &middot; <kbd>space</kbd> play &middot; <kbd>c</kbd> done &middot; <kbd>n</kbd> timestamped note</p>
       </div>
     </div>
   </section>
@@ -173,6 +205,11 @@
     </div>
 
     <label class="row-toggle">
+      <input id="set-recall" type="checkbox">
+      <span>Recall check after each section (schedules spaced reviews)</span>
+    </label>
+
+    <label class="row-toggle">
       <input id="set-autocomplete" type="checkbox">
       <span>Mark a section done when it finishes playing</span>
     </label>
@@ -182,6 +219,46 @@
       <input id="set-api-key" type="text" placeholder="AIza…" autocomplete="off" spellcheck="false">
     </label>
 
+    <div class="backup-block">
+      <span class="backup-head">Model helper <small>(optional)</small></span>
+      <p id="helper-status" class="hint"></p>
+      <div class="field-row">
+        <label class="field">
+          <span>Helper base URL</span>
+          <input id="set-helper-url" type="text" autocomplete="off" spellcheck="false" placeholder="http://localhost:8935">
+        </label>
+        <label class="field">
+          <span>Cards per section</span>
+          <input id="set-cards-per-chunk" type="number" min="1" max="10">
+        </label>
+      </div>
+      <div class="field-row">
+        <label class="field">
+          <span>Generator URL <small>(llama.cpp)</small></span>
+          <input id="set-gen-url" type="text" autocomplete="off" spellcheck="false" placeholder="http://localhost:8080/v1">
+        </label>
+        <label class="field">
+          <span>Generator model</span>
+          <input id="set-gen-model" type="text" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <label class="field">
+        <span>Judge model <small>(key stays in the helper, never here)</small></span>
+        <input id="set-judge-model" type="text" autocomplete="off" spellcheck="false">
+      </label>
+    </div>
+
+    <div class="backup-block">
+      <span class="backup-head">Backup</span>
+      <p class="hint">Everything lives in this browser. Export regularly.</p>
+      <div class="backup-row">
+        <button type="button" id="backup-download" class="secondary">Download backup</button>
+        <label class="file-btn secondary" for="backup-file">Restore from file</label>
+        <input id="backup-file" type="file" accept="application/json,.json" class="hidden">
+      </div>
+      <p id="backup-msg" class="hint"></p>
+    </div>
+
     <div class="settings-actions">
       <button type="button" id="settings-cancel" class="secondary">Cancel</button>
       <button id="settings-save" value="save">Save</button>
@@ -189,6 +266,21 @@
   </form>
 </dialog>
 
+<!-- CALIBRATION -->
+<dialog id="calibration-dialog">
+  <div class="settings-form">
+    <h3>Calibration</h3>
+    <p class="hint">Each card is generated with a predicted chance of being failed. This is whether that prediction held up.</p>
+    <div id="calibration-body"></div>
+    <div class="settings-actions">
+      <button type="button" id="calibration-close" class="secondary">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="llm.js" defer></script>
+<script src="cards.js" defer></script>
+<script src="backup.js" defer></script>
 <script src="app.js" defer></script>
 <!-- self-check for the parsing/chunking logic; only runs at index.html#test -->
 <script src="test.js" defer></script>

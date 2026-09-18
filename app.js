@@ -24,7 +24,14 @@ let settings = Object.assign(
     breakEvery: 2,
     breakSeconds: 60,
     autoComplete: true,
+    recallEnabled: true,
     speed: 1,
+    // model plumbing; all optional, all degrade to the app working as before
+    helperBaseUrl: 'http://localhost:8935',
+    genBaseUrl: 'http://localhost:8080/v1',
+    genModel: 'local-model',
+    judgeModel: 'gpt-4o-mini',
+    cardsPerChunk: 4,
   },
   readJson(SETTINGS_KEY, {})
 );
@@ -82,6 +89,39 @@ function renderTodayStat() {
   goalRingEl.setAttribute('stroke-dasharray', `${pct} ${100 - pct}`);
   goalRingEl.style.stroke = pct >= 100 ? 'var(--success)' : 'var(--accent)';
   streakCountEl.textContent = currentStreak();
+}
+
+/* ---------- spaced review ---------- */
+
+// Rating a section schedules the next time it resurfaces. Lost it -> same
+// session; shaky -> tomorrow; got it -> an expanding gap (1, 3, 7, 16, 35 days).
+const GOOD_GAPS_DAYS = [1, 3, 7, 16, 35];
+const DAY_MS = 86400000;
+
+function scheduleReview(chunk, rating) {
+  chunk.lastRating = rating;
+  if (rating === 1) {
+    chunk.reps = 0;
+    chunk.dueAt = Date.now() + 10 * 60 * 1000;
+  } else if (rating === 2) {
+    chunk.reps = Math.max(0, (chunk.reps || 0) - 1);
+    chunk.dueAt = Date.now() + DAY_MS;
+  } else {
+    const reps = chunk.reps || 0;
+    chunk.dueAt = Date.now() + GOOD_GAPS_DAYS[Math.min(reps, GOOD_GAPS_DAYS.length - 1)] * DAY_MS;
+    chunk.reps = reps + 1;
+  }
+}
+
+// every rated section across the whole library that is due now, soonest first
+function dueReviews(now = Date.now()) {
+  const due = [];
+  for (const video of library) {
+    for (const chunk of video.chunks) {
+      if (chunk.dueAt && chunk.dueAt <= now) due.push({ video, chunk });
+    }
+  }
+  return due.sort((x, y) => x.chunk.dueAt - y.chunk.dueAt);
 }
 
 /* ---------- small helpers ---------- */
@@ -367,9 +407,69 @@ function renderLibrary() {
     libraryListEl.appendChild(card);
   }
 
+  renderReviewPanel();
+
   librarySummaryEl.textContent = totalChunks
     ? `${doneChunks}/${totalChunks} sections done` + (remainingSeconds >= 1 ? ` · ${formatMinutes(remainingSeconds)} left` : ' · all caught up')
     : '';
+}
+
+const reviewPanelEl = document.getElementById('review-panel');
+const reviewListEl = document.getElementById('review-list');
+const reviewSummaryEl = document.getElementById('review-summary');
+const RATING_LABEL = { 1: 'lost it', 2: 'shaky', 3: 'got it' };
+
+function renderReviewPanel() {
+  const due = dueReviews();
+  const cards = dueCards();
+  reviewPanelEl.classList.toggle('hidden', due.length === 0 && cards.length === 0);
+  reviewListEl.innerHTML = '';
+  if (due.length === 0 && cards.length === 0) return;
+
+  const parts = [];
+  if (due.length) parts.push(`${due.length} section${due.length === 1 ? '' : 's'} to re-watch`);
+  if (cards.length) parts.push(`${cards.length} card${cards.length === 1 ? '' : 's'} due`);
+  reviewSummaryEl.textContent = parts.join(' · ');
+
+  for (const { video, chunk } of due.slice(0, 8)) {
+    const row = document.createElement('button');
+    row.className = 'review-item rating-' + (chunk.lastRating || 2);
+    row.innerHTML = `
+      <span class="review-dot"></span>
+      <span class="review-text">
+        <b class="review-chunk"></b>
+        <small class="review-video"></small>
+      </span>
+      <span class="review-meta">${RATING_LABEL[chunk.lastRating] || ''} &middot; ${formatMinutes(chunk.endSeconds - chunk.startSeconds)}</span>
+    `;
+    row.querySelector('.review-chunk').textContent = chunk.label;
+    row.querySelector('.review-video').textContent = video.title;
+    row.addEventListener('click', () => openVideo(video.id, chunk.id));
+    reviewListEl.appendChild(row);
+  }
+
+  // cards are grouped by the section that owns them; opening one starts there
+  const bySection = new Map();
+  for (const entry of cards) {
+    if (!bySection.has(entry.chunk.id)) bySection.set(entry.chunk.id, { entry, count: 0 });
+    bySection.get(entry.chunk.id).count++;
+  }
+  for (const { entry, count } of Array.from(bySection.values()).slice(0, 8)) {
+    const row = document.createElement('button');
+    row.className = 'review-item review-cards';
+    row.innerHTML = `
+      <span class="review-dot"></span>
+      <span class="review-text">
+        <b class="review-chunk"></b>
+        <small class="review-video"></small>
+      </span>
+      <span class="review-meta">${count} card${count === 1 ? '' : 's'}</span>
+    `;
+    row.querySelector('.review-chunk').textContent = entry.chunk.label;
+    row.querySelector('.review-video').textContent = entry.video.title;
+    row.addEventListener('click', () => openVideo(entry.video.id, entry.chunk.id));
+    reviewListEl.appendChild(row);
+  }
 }
 
 /* ---------- add video form ---------- */
@@ -436,7 +536,29 @@ const setBreaks = document.getElementById('set-breaks');
 const setBreakEvery = document.getElementById('set-break-every');
 const setBreakSeconds = document.getElementById('set-break-seconds');
 const setAutoComplete = document.getElementById('set-autocomplete');
+const setRecall = document.getElementById('set-recall');
 const setApiKey = document.getElementById('set-api-key');
+const setHelperUrl = document.getElementById('set-helper-url');
+const setGenUrl = document.getElementById('set-gen-url');
+const setGenModel = document.getElementById('set-gen-model');
+const setJudgeModel = document.getElementById('set-judge-model');
+const setCardsPerChunk = document.getElementById('set-cards-per-chunk');
+const helperStatusEl = document.getElementById('helper-status');
+
+// shown live in the settings dialog so a dead helper is obvious, not mysterious
+function renderHelperStatus() {
+  helperStatusEl.textContent = 'Checking helper…';
+  helperStatusEl.className = 'hint';
+  helperHealth({ refresh: true }).then((health) => {
+    if (!health) {
+      helperStatusEl.textContent = 'Helper not running. Card generation and answer grading stay hidden; everything else works. Start it with ./run.sh --helper';
+      return;
+    }
+    const transcripts = health.transcript ? `transcripts via ${health.transcript}` : 'no transcript backend installed';
+    const judge = health.judge ? `judge ready (${health.judgeModel})` : 'no judge key set';
+    helperStatusEl.textContent = `Helper running — ${transcripts}; ${judge}.`;
+  });
+}
 
 document.getElementById('settings-btn').addEventListener('click', () => {
   setGoal.value = settings.goalMinutes;
@@ -444,7 +566,14 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   setBreakEvery.value = settings.breakEvery;
   setBreakSeconds.value = settings.breakSeconds;
   setAutoComplete.checked = settings.autoComplete;
+  setRecall.checked = settings.recallEnabled;
   setApiKey.value = settings.apiKey;
+  setHelperUrl.value = settings.helperBaseUrl;
+  setGenUrl.value = settings.genBaseUrl;
+  setGenModel.value = settings.genModel;
+  setJudgeModel.value = settings.judgeModel;
+  setCardsPerChunk.value = settings.cardsPerChunk;
+  renderHelperStatus();
   settingsDialog.showModal();
 });
 
@@ -457,9 +586,16 @@ settingsDialog.addEventListener('close', () => {
   settings.breakEvery = Math.max(1, parseInt(setBreakEvery.value, 10) || 2);
   settings.breakSeconds = Math.max(10, parseInt(setBreakSeconds.value, 10) || 60);
   settings.autoComplete = setAutoComplete.checked;
+  settings.recallEnabled = setRecall.checked;
   settings.apiKey = setApiKey.value.trim();
+  settings.helperBaseUrl = setHelperUrl.value.trim();
+  settings.genBaseUrl = setGenUrl.value.trim();
+  settings.genModel = setGenModel.value.trim() || 'local-model';
+  settings.judgeModel = setJudgeModel.value.trim() || 'gpt-4o-mini';
+  settings.cardsPerChunk = Math.min(10, Math.max(1, parseInt(setCardsPerChunk.value, 10) || 4));
   saveSettings();
   localStorage.removeItem('chunkify:apiKey');
+  forgetHelperHealth();
   renderTodayStat();
 });
 
@@ -495,7 +631,7 @@ redoSetupBtn.addEventListener('click', () => {
   renderChunkList();
 });
 
-function openVideo(videoId) {
+function openVideo(videoId, startChunkId = null) {
   currentVideo = library.find((v) => v.id === videoId);
   if (!currentVideo) return;
   currentChunkIndex = -1;
@@ -519,6 +655,13 @@ function openVideo(videoId) {
     renderAutosplitHint();
     playerControlsEl.classList.toggle('hidden', currentVideo.chunks.length === 0);
     if (currentVideo.chunks.length === 0) tryAutoDetectChapters(currentVideo);
+    if (startChunkId) {
+      const idx = currentVideo.chunks.findIndex((c) => c.id === startChunkId);
+      if (idx !== -1) {
+        resumeBannerEl.classList.add('hidden');
+        setActiveChunk(idx, { play: true });
+      }
+    }
   });
 }
 
@@ -617,12 +760,14 @@ function renderChunkList() {
           <div class="chunk-time">${formatTime(chunk.startSeconds)} &ndash; ${formatTime(chunk.endSeconds)} &middot; ${formatMinutes(chunk.endSeconds - chunk.startSeconds)}</div>
         </div>
         <div class="chunk-actions">
+          <button class="icon-btn cards-btn ${verifiedCards(chunk).length ? 'has-cards' : ''}" title="Cards">&#9632;</button>
           <button class="icon-btn note-btn ${chunk.note ? 'has-note' : ''}" title="Notes">&#9776;</button>
           <button class="icon-btn rename-btn" title="Rename">&#9998;</button>
           <button class="icon-btn delete-chunk-btn" title="Delete">&times;</button>
         </div>
       </div>
       <div class="chunk-note hidden"><textarea rows="3" placeholder="Notes for this section…"></textarea></div>
+      <div class="chunk-cards hidden"></div>
     `;
     item.querySelector('.chunk-label').textContent = chunk.label;
 
@@ -647,9 +792,26 @@ function renderChunkList() {
     noteArea.addEventListener('input', () => {
       chunk.note = noteArea.value;
       item.querySelector('.note-btn').classList.toggle('has-note', !!chunk.note);
+      renderNoteStamps(noteWrap, chunk);
       clearTimeout(noteSaveTimer);
       noteSaveTimer = setTimeout(saveLibrary, 400);
     });
+    noteArea.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      noteArea.blur();
+      if (player && player.playVideo) player.playVideo();
+    });
+    renderNoteStamps(noteWrap, chunk);
+
+    const cardsWrap = item.querySelector('.chunk-cards');
+    item.querySelector('.cards-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const opening = cardsWrap.classList.contains('hidden');
+      cardsWrap.classList.toggle('hidden');
+      if (opening) renderChunkCards(cardsWrap, currentVideo, chunk); // build on demand, not on every list render
+    });
+    cardsWrap.addEventListener('click', (e) => e.stopPropagation());
 
     item.querySelector('.rename-btn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -672,6 +834,36 @@ function renderChunkList() {
     chunkListEl.appendChild(item);
   });
   renderSideProgress();
+}
+
+// every "[mm:ss]" in a note becomes a chip that seeks back to that moment
+const NOTE_STAMP_RE = /\[(\d{1,3}):(\d{2})(?::(\d{2}))?\]/g;
+
+function renderNoteStamps(noteWrap, chunk) {
+  let strip = noteWrap.querySelector('.note-stamps');
+  if (!strip) {
+    strip = document.createElement('div');
+    strip.className = 'note-stamps';
+    noteWrap.appendChild(strip);
+  }
+  strip.innerHTML = '';
+  for (const m of (chunk.note || '').matchAll(NOTE_STAMP_RE)) {
+    const seconds = m[3] !== undefined
+      ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+      : Number(m[1]) * 60 + Number(m[2]);
+    const chip = document.createElement('button');
+    chip.className = 'stamp-chip';
+    chip.textContent = m[0].slice(1, -1);
+    chip.title = 'Jump back here';
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (player && player.seekTo) {
+        player.seekTo(seconds, true);
+        player.playVideo();
+      }
+    });
+    strip.appendChild(chip);
+  }
 }
 
 function deleteChunk(index) {
@@ -774,6 +966,9 @@ function startBreak(secondsLeft, onDone) {
 }
 
 function endBreak() {
+  recallOverlay.classList.add('hidden');
+  recallResume = null;
+  resetRecallAnswer();
   clearInterval(breakTimer);
   breakTimer = null;
   breakResume = null;
@@ -791,6 +986,106 @@ document.getElementById('break-end').addEventListener('click', () => {
   endBreak();
   showLibrary();
 });
+
+/* ---------- recall check ---------- */
+
+const recallOverlay = document.getElementById('recall-overlay');
+const recallQEl = document.getElementById('recall-q');
+const recallAnswerBlock = document.getElementById('recall-answer-block');
+const recallAnswerEl = document.getElementById('recall-answer');
+const recallGradeBtn = document.getElementById('recall-grade');
+const recallGradeStatus = document.getElementById('recall-grade-status');
+const recallSuggestionEl = document.getElementById('recall-suggestion');
+const recallSuggestionText = document.getElementById('recall-suggestion-text');
+const recallAcceptBtn = document.getElementById('recall-accept');
+
+let recallResume = null;     // what to do once the section has been rated
+let recallCard = null;       // the card being asked, when the section has one
+let recallSuggested = null;  // the judge's suggested rating, before the user acts
+
+function resetRecallAnswer() {
+  recallCard = null;
+  recallSuggested = null;
+  recallAnswerEl.value = '';
+  recallGradeStatus.textContent = '';
+  recallGradeStatus.classList.remove('cards-error');
+  recallSuggestionEl.classList.add('hidden');
+  recallAnswerBlock.classList.add('hidden');
+}
+
+function startRecall(chunk, onDone) {
+  recallResume = onDone;
+  resetRecallAnswer();
+
+  // a verified card turns the open prompt into a specific question that can be graded
+  recallCard = nextCardForChunk(chunk);
+  if (recallCard) {
+    recallQEl.textContent = recallCard.prompt;
+    helperHealth().then((health) => {
+      if (health && health.judge && recallResume) recallAnswerBlock.classList.remove('hidden');
+    });
+  } else {
+    recallQEl.textContent = `What do you remember from "${chunk.label}"?`;
+  }
+  recallOverlay.classList.remove('hidden');
+}
+
+function gradeTypedAnswer() {
+  const typed = recallAnswerEl.value.trim();
+  if (!typed || !recallCard) return;
+  recallGradeBtn.disabled = true;
+  recallGradeStatus.classList.remove('cards-error');
+  recallGradeStatus.textContent = 'Grading…';
+
+  gradeFreeRecall(recallCard, typed)
+    .then(({ rating, reason }) => {
+      recallGradeBtn.disabled = false;
+      recallGradeStatus.textContent = '';
+      recallSuggested = rating;
+      recallSuggestionText.textContent = `${RATING_WORD[rating]} — ${reason}`;
+      recallSuggestionEl.className = 'recall-suggestion rating-' + rating;
+      recallAcceptBtn.textContent = `Accept "${RATING_WORD[rating]}"`;
+    })
+    .catch((err) => {
+      recallGradeBtn.disabled = false;
+      recallGradeStatus.textContent = err.message;
+      recallGradeStatus.classList.add('cards-error');
+    });
+}
+
+recallGradeBtn.addEventListener('click', gradeTypedAnswer);
+recallAcceptBtn.addEventListener('click', () => { if (recallSuggested) finishRecall(recallSuggested); });
+recallAnswerEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); gradeTypedAnswer(); }
+});
+
+function finishRecall(rating) {
+  if (!recallResume) return;
+  const resume = recallResume;
+  const card = recallCard;
+  const suggested = recallSuggested;
+  const typed = recallAnswerEl.value;
+  recallResume = null;
+  recallOverlay.classList.add('hidden');
+
+  if (rating) {
+    const chunk = currentVideo && currentVideo.chunks[currentChunkIndex];
+    if (chunk) {
+      scheduleReview(chunk, rating);
+      // the card carries the calibration record: what was predicted, what happened
+      if (card) recordCardOutcome(card, rating, { suggested, typedAnswer: typed });
+      saveLibrary();
+      renderChunkList();
+    }
+  }
+  resetRecallAnswer();
+  resume();
+}
+
+[3, 2, 1].forEach((rating) => {
+  document.getElementById('recall-' + rating).addEventListener('click', () => finishRecall(rating));
+});
+document.getElementById('recall-skip').addEventListener('click', () => finishRecall(null));
 
 /* ---------- playback: chunk navigation + polling ---------- */
 
@@ -825,6 +1120,17 @@ function advanceFromCurrentChunk() {
     renderChunkList();
   }
 
+  // ask for a recall rating first; the rest of the advance runs once it's answered
+  if (settings.recallEnabled && chunk && !recallResume) {
+    player.pauseVideo();
+    stopPolling();
+    startRecall(chunk, continueAfterChunk);
+    return;
+  }
+  continueAfterChunk();
+}
+
+function continueAfterChunk() {
   const nextIndex = currentChunkIndex + 1;
   if (nextIndex >= currentVideo.chunks.length) {
     player.pauseVideo();
@@ -914,6 +1220,25 @@ document.getElementById('mark-chapter-btn').addEventListener('click', () => {
   renderChunkList();
 });
 
+/* pause and drop a timestamped line into the current section's notes */
+function jotTimestampedNote() {
+  if (!currentVideo || currentChunkIndex === -1 || !player || !player.getCurrentTime) return;
+  const item = chunkListEl.children[currentChunkIndex];
+  if (!item) return;
+  if (player.pauseVideo) player.pauseVideo();
+
+  const chunk = currentVideo.chunks[currentChunkIndex];
+  const stamp = `[${formatTime(player.getCurrentTime())}] `;
+  const noteWrap = item.querySelector('.chunk-note');
+  const noteArea = noteWrap.querySelector('textarea');
+  noteWrap.classList.remove('hidden');
+  noteArea.value = (chunk.note ? chunk.note.replace(/\s*$/, '') + '\n' : '') + stamp;
+  chunk.note = noteArea.value;
+  saveLibrary();
+  noteArea.focus();
+  noteArea.setSelectionRange(noteArea.value.length, noteArea.value.length);
+}
+
 /* ---------- keyboard shortcuts ---------- */
 
 document.addEventListener('keydown', (e) => {
@@ -921,9 +1246,18 @@ document.addEventListener('keydown', (e) => {
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select' || settingsDialog.open) return;
 
+  // a recall check owns the keyboard while it's up
+  if (recallResume) {
+    if ('123'.includes(e.key)) finishRecall(4 - Number(e.key));
+    else if (e.key === 'Escape') finishRecall(null);
+    e.preventDefault();
+    return;
+  }
+
   if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
   else if (e.key.toLowerCase() === 'c') { toggleCurrentComplete(); }
+  else if (e.key.toLowerCase() === 'n') { e.preventDefault(); jotTimestampedNote(); }
   else if (e.key === 'Escape' && breakTimer) { skipBreak(); }
   else if (e.key === ' ') {
     if (!player || !player.getPlayerState) return;

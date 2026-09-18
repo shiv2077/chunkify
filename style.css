@@ -367,3 +367,138 @@ kbd {
   .header-inner { padding-inline: 1rem; }
   #app { padding-inline: 1rem; }
 }
+
+/* ---------- recall check ---------- */
+
+.recall-q {
+  margin: 0.2rem 0 0; font-size: clamp(1.05rem, 3vw, 1.5rem); font-weight: 500;
+  max-width: 34ch;
+}
+.recall-actions { flex-wrap: wrap; justify-content: center; }
+.recall-good { background: var(--success); color: #0b0b10; }
+.recall-ok { background: #e9b949; color: #0b0b10; }
+.recall-bad { background: var(--danger); color: #0b0b10; }
+#recall-skip { margin-top: 0.9rem; font-size: 0.78rem; }
+
+/* ---------- due-for-review queue ---------- */
+
+.review-panel {
+  margin-bottom: 1.6rem; padding: 1rem 1.1rem 1.1rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: var(--radius);
+}
+.review-panel .library-head { margin-top: 0; }
+.review-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.review-item {
+  display: flex; align-items: center; gap: 0.7rem; width: 100%; text-align: left;
+  padding: 0.55rem 0.7rem; border-radius: 9px; cursor: pointer;
+  background: var(--bg); border: 1px solid var(--border-soft); color: var(--text);
+}
+.review-item:hover { background: var(--bg-hover); border-color: var(--accent); }
+.review-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-dim); }
+.review-item.rating-1 .review-dot { background: var(--danger); }
+.review-item.rating-2 .review-dot { background: #e9b949; }
+.review-item.rating-3 .review-dot { background: var(--success); }
+.review-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.review-text b { font-size: 0.87rem; font-weight: 500; }
+.review-text small,
+.review-meta { color: var(--text-dim); font-size: 0.74rem; }
+.review-text small,
+.review-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-meta { flex: none; }
+
+/* ---------- timestamp chips under a note ---------- */
+
+.note-stamps { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
+.note-stamps:empty { display: none; }
+.stamp-chip {
+  padding: 0.12rem 0.45rem; font-size: 0.7rem; font-variant-numeric: tabular-nums;
+  border-radius: 999px; cursor: pointer;
+  background: var(--accent-soft); color: var(--accent-2);
+  border: 1px solid transparent;
+}
+.stamp-chip:hover { border-color: var(--accent); }
+
+/* ---------- backup block in settings ---------- */
+
+.backup-block {
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem; margin-top: 0.2rem;
+}
+.backup-head { font-size: 0.83rem; font-weight: 600; }
+.backup-block .hint { margin-bottom: 0.55rem; }
+.backup-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.file-btn {
+  display: inline-block; cursor: pointer;
+  background: var(--bg-hover); color: var(--text); border: 1px solid var(--border);
+  border-radius: 9px; padding: 0.55rem 0.95rem; font-size: 0.88rem; font-weight: 500;
+}
+.file-btn:hover { background: var(--border); }
+
+/* ---------- cards on a section ---------- */
+
+.chunk-cards { padding: 0 0.6rem 0.6rem; }
+.chunk-actions .has-cards { color: var(--accent); }
+.cards-bar { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.cards-bar button { padding: 0.35rem 0.7rem; font-size: 0.78rem; }
+.cards-status { font-size: 0.74rem; color: var(--text-dim); flex: 1; min-width: 0; }
+.cards-status.cards-error { color: var(--danger); }
+.cards-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.card-row {
+  position: relative;
+  background: var(--bg); border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 8px; padding: 0.5rem 1.6rem 0.5rem 0.6rem;
+}
+.card-row.verified { border-left-color: var(--success); }
+.card-row.rejected { border-left-color: var(--danger); opacity: 0.72; }
+.card-head { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.3rem; }
+.card-badge {
+  font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 0.35rem;
+}
+.card-diff { font-size: 0.68rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.card-prompt { margin: 0; font-size: 0.8rem; font-weight: 500; }
+.card-answer { margin: 0.15rem 0 0; font-size: 0.78rem; color: var(--text-dim); }
+.card-why { margin: 0.3rem 0 0; font-size: 0.7rem; color: var(--danger); }
+.card-del { position: absolute; top: 0.3rem; right: 0.25rem; }
+.review-item.review-cards .review-dot { background: var(--accent-2); }
+
+/* ---------- free-recall answer box ---------- */
+
+.recall-answer { width: min(560px, 92%); margin: 0.7rem 0 0.2rem; }
+.recall-answer textarea { font-size: 0.85rem; background: rgba(20, 20, 27, 0.9); }
+.recall-answer-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+.recall-answer-actions button { padding: 0.35rem 0.7rem; font-size: 0.78rem; }
+.recall-suggestion {
+  display: flex; align-items: center; gap: 0.6rem; text-align: left;
+  margin-top: 0.55rem; padding: 0.5rem 0.65rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-left: 3px solid var(--text-dim); border-radius: 9px;
+}
+.recall-suggestion.rating-3 { border-left-color: var(--success); }
+.recall-suggestion.rating-2 { border-left-color: #e9b949; }
+.recall-suggestion.rating-1 { border-left-color: var(--danger); }
+.recall-suggestion p { margin: 0; flex: 1; font-size: 0.79rem; }
+.recall-suggestion button { padding: 0.3rem 0.65rem; font-size: 0.76rem; white-space: nowrap; }
+
+/* ---------- calibration view ---------- */
+
+#calibration-dialog {
+  background: var(--bg-elevated); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0; width: min(480px, 94vw); box-shadow: var(--shadow);
+}
+#calibration-dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); }
+.calib-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+.calib-stat {
+  background: var(--bg); border: 1px solid var(--border-soft);
+  border-radius: 9px; padding: 0.5rem 0.4rem; text-align: center;
+}
+.calib-stat b { display: block; font-size: 1rem; font-variant-numeric: tabular-nums; }
+.calib-stat small { color: var(--text-dim); font-size: 0.64rem; }
+.calib-plot-wrap { display: flex; justify-content: center; }
+.calib-plot { width: 240px; height: 240px; }
+.calib-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.calib-table th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 0.25rem 0.3rem; }
+.calib-table td { padding: 0.25rem 0.3rem; border-top: 1px solid var(--border-soft); }
