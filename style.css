@@ -441,8 +441,8 @@ kbd {
 .chunk-actions .has-cards { color: var(--accent); }
 .cards-bar { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .cards-bar button { padding: 0.35rem 0.7rem; font-size: 0.78rem; }
-.cards-status { font-size: 0.74rem; color: var(--text-dim); flex: 1; min-width: 0; }
-.cards-status.cards-error { color: var(--danger); }
+.cards-status, .grade-status { font-size: 0.74rem; color: var(--text-dim); flex: 1; min-width: 0; }
+.cards-status.cards-error, .grade-status.cards-error { color: var(--danger); }
 .cards-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .card-row {
   position: relative;
