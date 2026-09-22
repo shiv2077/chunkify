@@ -12,11 +12,11 @@ report. Pass --no-cache to force fresh calls.
 
     python eval_foundry.py chunkify-backup-2026-09-19.json --sample 5
 
-The prompts below are a copy of the ones in cards.js. cards.js is the source of
-truth; change both together or the evaluation stops describing the app.
+Prompts and schemas come from prompts.json, the same file the browser reads, so
+this evaluation always runs what the app runs.
 
 Standard library only. Needs the helper running for transcripts and the judge,
-and a llama.cpp server for generation.
+and a local OpenAI-compatible server (Ollama) for generation.
 """
 
 import argparse
@@ -32,7 +32,40 @@ import urllib.request
 CACHE_DIR = os.path.expanduser(os.environ.get("CHUNKIFY_CACHE_DIR", "~/.cache/chunkify"))
 EVAL_CACHE = os.path.join(CACHE_DIR, "eval-cache")
 
-CARD_SCHEMA_HINT = '{"cards":[{"type":"open"|"cloze","prompt":string,"answer":string,"difficulty":number,"quote":string}]}'
+PROMPTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts.json")
+
+with open(PROMPTS_PATH, encoding="utf-8") as _fh:
+    PROMPTS = json.load(_fh)
+
+
+def fill_template(tpl, **vars):
+    """{{name}} -> vars[name]; the same substitution cards.js does."""
+    return re.sub(r"\{\{(\w+)\}\}", lambda m: str(vars.get(m.group(1), m.group(0))), str(tpl))
+
+
+def prompt_messages(spec, **vars):
+    return [
+        {"role": "system", "content": spec["system"]},
+        {"role": "user", "content": fill_template(spec["user"], **vars)},
+    ]
+
+
+QUOTE_ECHO_RE = re.compile(r"""\s*(?:quote|source)\s*[:=]\s*["'\u2018\u201c].*$""", re.I | re.S)
+
+
+def strip_quote_echo(s):
+    return QUOTE_ECHO_RE.sub("", str(s)).strip()
+
+
+def tidy_truncation(s, cap):
+    """maxLength is a hard cut; fall back to the last full sentence or word."""
+    if len(s) < cap - 4 or s.endswith((".", "!", "?")):
+        return s
+    sentence = max(s.rfind("."), s.rfind("!"), s.rfind("?"))
+    if sentence > cap * 0.5:
+        return s[:sentence + 1]
+    word = s.rfind(" ")
+    return (s[:word] if word > cap * 0.5 else s).rstrip(" ,;:") + "\u2026"
 
 
 # ---------- transport ----------
@@ -53,15 +86,20 @@ def get_json(url, timeout=180):
         return json.loads(res.read().decode())
 
 
-def chat(messages, *, url, model, max_tokens, use_cache=True):
+def chat(messages, *, url, model, max_tokens, schema=None, schema_name="reply", use_cache=True):
     """One chat-completions call, cached by the exact request it makes."""
     payload = {
-        "model": model,
         "messages": messages,
         "temperature": 0,
         "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
+        "response_format": (
+            {"type": "json_schema", "json_schema": {"name": schema_name, "strict": True, "schema": schema}}
+            if schema else {"type": "json_object"}
+        ),
     }
+    # the helper picks the judge model; only the generator is named by the client
+    if model:
+        payload["model"] = model
     key = hashlib.sha256(json.dumps([url, payload], sort_keys=True).encode()).hexdigest()
     path = os.path.join(EVAL_CACHE, f"{key}.json")
 
@@ -87,6 +125,10 @@ def parse_json_reply(text):
     if start == -1:
         raise ValueError("model reply contained no JSON")
     end = max(body.rfind("]"), body.rfind("}"))
+    # no closing bracket after the opening one means the reply stopped mid-JSON,
+    # which is a token limit, not malformed output
+    if end < start:
+        raise ValueError("model reply was cut off before it finished (raise max_tokens or lower --cards)")
     return json.loads(body[start:end + 1])
 
 
@@ -113,35 +155,18 @@ def generate_candidates(chunk, window, count, *, gen_url, gen_model, use_cache):
     if len(text.strip()) < 80:
         raise ValueError("transcript window too short")
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You write study flashcards from a transcript segment. Reply with JSON only, no prose, "
-                       f"matching this shape: {CARD_SCHEMA_HINT}",
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Section title: {chunk['label']}\n"
-                f'Transcript segment:\n"""\n{text[:6000]}\n"""\n\n'
-                f"Write exactly {count} flashcards testing the substance of this segment.\n"
-                '- Mix "open" cards (a question answered from memory) and "cloze" cards (a sentence with the key term replaced by ___).\n'
-                "- Every answer must be stated in the segment. Never use outside knowledge.\n"
-                '- "quote" must be copied verbatim from the segment and must contain the answer.\n'
-                '- "difficulty" is your prediction of how likely a student is to get this wrong on first recall, from 0.0 (nearly everyone recalls it) to 1.0 (nearly everyone fails).\n'
-                "- Do not write questions about the video itself, the speaker, or the format."
-            ),
-        },
-    ]
-
+    spec = PROMPTS["generate"]
+    messages = prompt_messages(spec, label=chunk["label"], text=text[:6000], count=count)
     reply = parse_json_reply(chat(messages, url=f"{gen_url}/chat/completions", model=gen_model,
-                                 max_tokens=1400, use_cache=use_cache))
+                                 max_tokens=spec["maxTokens"], schema=spec["schema"],
+                                 schema_name=spec["schemaName"], use_cache=use_cache))
     raw = reply if isinstance(reply, list) else reply.get("cards", [])
     out = []
     for c in raw[:count]:
         if not isinstance(c, dict):
             continue
-        prompt, answer = str(c.get("prompt", "")).strip(), str(c.get("answer", "")).strip()
+        prompt = tidy_truncation(strip_quote_echo(c.get("prompt", "")), 220)
+        answer = tidy_truncation(strip_quote_echo(c.get("answer", "")), 220)
         if not prompt or not answer:
             continue
         out.append({
@@ -154,29 +179,17 @@ def generate_candidates(chunk, window, count, *, gen_url, gen_model, use_cache):
 
 
 def verify_candidate(card, segment_text, existing, *, helper_url, judge_model, use_cache):
-    listed = "\n".join(f"- {p}" for p in existing) if existing else "(none)"
-    messages = [
-        {
-            "role": "system",
-            "content": "You check study flashcards against their source segment. Reply with JSON only: "
-                       '{"answerable":boolean,"grounded":boolean,"duplicate":boolean,"reason":string}',
-        },
-        {
-            "role": "user",
-            "content": (
-                f'Source segment:\n"""\n{segment_text[:6000]}\n"""\n\n'
-                f"Card question: {card['prompt']}\n"
-                f"Card answer: {card['answer']}\n\n"
-                f"Existing cards already in this deck:\n{listed}\n\n"
-                "answerable: can the question be answered using only the segment above?\n"
-                "grounded: is the given answer actually stated in the segment, and correct?\n"
-                "duplicate: does it test the same fact as one of the existing cards?\n"
-                "reason: one short sentence explaining the call."
-            ),
-        },
-    ]
-    v = parse_json_reply(chat(messages, url=f"{helper_url}/judge", model=judge_model,
-                             max_tokens=300, use_cache=use_cache))
+    spec = PROMPTS["verify"]
+    messages = prompt_messages(
+        spec,
+        segment=segment_text[:6000],
+        prompt=card["prompt"],
+        answer=card["answer"],
+        existing="\n".join(f"- {p}" for p in existing) if existing else "(none)",
+    )
+    v = parse_json_reply(chat(messages, url=f"{helper_url}/judge", model=None,
+                             max_tokens=spec["maxTokens"], schema=spec["schema"],
+                             schema_name=spec["schemaName"], use_cache=use_cache))
     return {
         "answerable": v.get("answerable") is True,
         "grounded": v.get("grounded") is True,
@@ -240,9 +253,10 @@ def main():
     ap.add_argument("--sample", type=int, default=5, help="sections to evaluate (default 5)")
     ap.add_argument("--cards", type=int, default=4, help="cards requested per section (default 4)")
     ap.add_argument("--helper", default="http://localhost:8935", help="helper base URL")
-    ap.add_argument("--gen-url", default="http://localhost:8080/v1", help="llama.cpp OpenAI-compatible base URL")
-    ap.add_argument("--gen-model", default="local-model")
-    ap.add_argument("--judge-model", default="gpt-4o-mini")
+    ap.add_argument("--gen-url", default="http://localhost:11434/v1", help="local OpenAI-compatible base URL (Ollama)")
+    ap.add_argument("--gen-model", default="qwen2.5:3b")
+    ap.add_argument("--judge-model", default=None,
+                    help="informational only; the helper picks the judge model it holds a key for")
     ap.add_argument("--no-cache", action="store_true", help="ignore the response cache and call the models")
     ap.add_argument("--json", action="store_true", help="emit the report as JSON")
     args = ap.parse_args()

@@ -28,13 +28,18 @@ let settings = Object.assign(
     speed: 1,
     // model plumbing; all optional, all degrade to the app working as before
     helperBaseUrl: 'http://localhost:8935',
-    genBaseUrl: 'http://localhost:8080/v1',
-    genModel: 'local-model',
-    judgeModel: 'gpt-4o-mini',
+    genBaseUrl: 'http://localhost:11434/v1',
+    genModel: 'qwen2.5:3b',
     cardsPerChunk: 4,
+    reelFill: false,
   },
   readJson(SETTINGS_KEY, {})
 );
+// one-time migration: the generator default moved from a bare llama.cpp port
+// to Ollama's, which is what the local setup actually installs
+if (settings.genBaseUrl === 'http://localhost:8080/v1') settings.genBaseUrl = 'http://localhost:11434/v1';
+if (settings.genModel === 'local-model') settings.genModel = 'qwen2.5:3b';
+
 let stats = readJson(STATS_KEY, { days: {} });
 
 function saveLibrary() { localStorage.setItem(STORAGE_KEY, JSON.stringify(library)); }
@@ -541,7 +546,6 @@ const setApiKey = document.getElementById('set-api-key');
 const setHelperUrl = document.getElementById('set-helper-url');
 const setGenUrl = document.getElementById('set-gen-url');
 const setGenModel = document.getElementById('set-gen-model');
-const setJudgeModel = document.getElementById('set-judge-model');
 const setCardsPerChunk = document.getElementById('set-cards-per-chunk');
 const helperStatusEl = document.getElementById('helper-status');
 
@@ -571,7 +575,6 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   setHelperUrl.value = settings.helperBaseUrl;
   setGenUrl.value = settings.genBaseUrl;
   setGenModel.value = settings.genModel;
-  setJudgeModel.value = settings.judgeModel;
   setCardsPerChunk.value = settings.cardsPerChunk;
   renderHelperStatus();
   settingsDialog.showModal();
@@ -591,7 +594,6 @@ settingsDialog.addEventListener('close', () => {
   settings.helperBaseUrl = setHelperUrl.value.trim();
   settings.genBaseUrl = setGenUrl.value.trim();
   settings.genModel = setGenModel.value.trim() || 'local-model';
-  settings.judgeModel = setJudgeModel.value.trim() || 'gpt-4o-mini';
   settings.cardsPerChunk = Math.min(10, Math.max(1, parseInt(setCardsPerChunk.value, 10) || 4));
   saveSettings();
   localStorage.removeItem('chunkify:apiKey');
@@ -646,6 +648,7 @@ function openVideo(videoId, startChunkId = null) {
   renderChunkSetupVisibility();
   renderChunkList();
   updateResumeBanner();
+  renderReelsButton();
 
   cueAndGetDuration(currentVideo.id).then((duration) => {
     if (duration && duration > 0) {
@@ -1243,6 +1246,7 @@ function jotTimestampedNote() {
 
 document.addEventListener('keydown', (e) => {
   if (!currentVideo || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (reelDeckOpen()) return;   // the reel deck has its own handler
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select' || settingsDialog.open) return;
 

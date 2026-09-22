@@ -64,6 +64,7 @@ if (location.hash === '#test') {
   const sampleLib = [{
     id: 'dQw4w9WgXcQ', url: 'u', title: 'T', thumbnailUrl: null, durationSeconds: 600,
     lastWatched: { chunkId: 'c1', positionSeconds: 12.5 },
+    reels: [{ id: 'r1', title: 'A clip', hook: 'what you learn', startSeconds: 30, endSeconds: 70, createdAt: 1 }],
     chunks: [
       { id: 'c1', label: 'A', startSeconds: 0, endSeconds: 300, completed: true, note: '[1:00] hi' },
       { id: 'c2', label: 'B', startSeconds: 300, endSeconds: 600, completed: false, note: '', dueAt: 123, reps: 2, lastRating: 3 },
@@ -75,6 +76,12 @@ if (location.hash === '#test') {
   eq('round-trip preserves the library exactly', roundTrip(sampleLib, settings, sampleStats).data.library, sampleLib);
   eq('round-trip preserves stats exactly', roundTrip(sampleLib, settings, sampleStats).data.stats, sampleStats);
   eq('round-trip keeps review fields', roundTrip(sampleLib, settings, sampleStats).data.library[0].chunks[1].reps, 2);
+  eq('round-trip keeps reels', roundTrip(sampleLib, settings, sampleStats).data.library[0].reels,
+    [{ id: 'r1', title: 'A clip', hook: 'what you learn', startSeconds: 30, endSeconds: 70, createdAt: 1 }]);
+  eq('a video with reels but no cards still validates',
+    validateBackup({ app: 'chunkify', version: 1, settings: {}, stats: { days: {} },
+      library: [{ id: 'v', reels: [{ id: 'r', title: 't', startSeconds: 0, endSeconds: 20 }], chunks: [] }] }).error,
+    undefined);
   eq('round-trip of an empty library is valid', roundTrip([], {}, { days: {} }).error, undefined);
   eq('export is self-identifying', [buildBackup([], {}, { days: {} }).app, buildBackup([], {}, { days: {} }).version], ['chunkify', 1]);
 
@@ -122,6 +129,76 @@ if (location.hash === '#test') {
   eq('a confident-but-wrong forecaster shows a large gap',
     expectedCalibrationError([O(0.9, 0), O(0.9, 0)], 5), 0.9);
   eq('calibration error of no data is null', expectedCalibrationError([]), null);
+
+  // model-output cleanup
+  eq('strips an echoed quote from an answer',
+    stripQuoteEcho("A number between 0 and 1. quote: 'each neuron holds a number'"), 'A number between 0 and 1.');
+  eq('strips an echoed source label', stripQuoteEcho('The output layer. source: "the last layer"'), 'The output layer.');
+  eq('leaves a clean answer alone', stripQuoteEcho('16 neurons'), '16 neurons');
+  eq('does not eat the word quote in prose', stripQuoteEcho('He gave a quote about neurons'), 'He gave a quote about neurons');
+
+  eq('short text is untouched', tidyTruncation('16 neurons', 220), '16 neurons');
+  eq('a properly ended sentence is untouched',
+    tidyTruncation('x'.repeat(219) + '.', 220), 'x'.repeat(219) + '.');
+  // sentence end must fall past the halfway mark to be worth keeping
+  eq('a mid-word cut falls back to the last sentence',
+    tidyTruncation('A'.repeat(150) + '. ' + 'B'.repeat(66), 220), 'A'.repeat(150) + '.');
+  eq('an early sentence end is not worth keeping, so it cuts at a word',
+    tidyTruncation('Hi. ' + 'word '.repeat(42) + 'dangl', 220), ('Hi. ' + 'word '.repeat(42)).trim() + '\u2026');
+  eq('with no sentence end it cuts at a word and marks it',
+    tidyTruncation('word '.repeat(43) + 'dangl', 220), ('word '.repeat(43)).trim() + '\u2026');
+  eq('a trailing comma is not left behind',
+    /[,;:]\u2026$/.test(tidyTruncation('alpha beta, '.padEnd(219, 'z'), 220)), false);
+
+  // a reply cut off mid-JSON is a token limit, not malformed output
+  eq('truncated JSON is reported as cut off',
+    (() => { try { parseJsonReply('{"cards":[{"prompt":"a"'); return 'no throw'; }
+             catch (e) { return /cut off/.test(e.message); } })(), true);
+  eq('a reply with no JSON at all says so',
+    (() => { try { parseJsonReply('I cannot help with that'); return 'no throw'; }
+             catch (e) { return /no JSON/.test(e.message); } })(), true);
+  eq('fenced JSON still parses', parseJsonReply('here:\n```json\n{"a":1}\n```'), { a: 1 });
+
+  // reels: raw model output -> clips that are safe to play
+  const segs = Array.from({ length: 30 }, (_, i) => ({ start: i * 10, end: i * 10 + 10, text: 'x' }));
+  const reels = (raw, duration = 300) => buildReels(raw, segs, duration).map((r) => [r.title, r.startSeconds, r.endSeconds]);
+
+  eq('snaps both edges to transcript lines',
+    reels([{ title: 'A', startSeconds: 12, endSeconds: 47 }]), [['A', 10, 50]]);
+  eq('a clip longer than the cap is truncated',
+    reels([{ title: 'A', startSeconds: 0, endSeconds: 280 }]), [['A', 0, 75]]);
+  eq('a clip shorter than the floor is extended',
+    reels([{ title: 'A', startSeconds: 10, endSeconds: 15 }]), [['A', 10, 30]]);
+  eq('clips are clamped inside the video',
+    reels([{ title: 'A', startSeconds: 280, endSeconds: 9999 }]), [['A', 280, 300]]);
+  eq('an overlapping clip is dropped, the earlier one wins',
+    reels([{ title: 'A', startSeconds: 0, endSeconds: 40 }, { title: 'B', startSeconds: 30, endSeconds: 80 }]),
+    [['A', 0, 40]]);
+  eq('touching but not overlapping is fine',
+    reels([{ title: 'A', startSeconds: 0, endSeconds: 40 }, { title: 'B', startSeconds: 40, endSeconds: 80 }]),
+    [['A', 0, 40], ['B', 40, 80]]);
+  eq('out-of-order clips come back in order',
+    reels([{ title: 'B', startSeconds: 100, endSeconds: 140 }, { title: 'A', startSeconds: 0, endSeconds: 40 }]),
+    [['A', 0, 40], ['B', 100, 140]]);
+  eq('a clip with no title is dropped', reels([{ startSeconds: 0, endSeconds: 40 }]), []);
+  eq('non-numeric times are dropped', reels([{ title: 'A', startSeconds: 'soon', endSeconds: 40 }]), []);
+  eq('a backwards clip is dropped', reels([{ title: 'A', startSeconds: 90, endSeconds: 30 }]), []);
+  eq('junk input gives no clips', buildReels(null, segs, 300), []);
+  eq('every clip gets an id', buildReels([{ title: 'A', startSeconds: 0, endSeconds: 40 }], segs, 300)[0].id.startsWith('id-'), true);
+
+  eq('passes cover the whole video, not just the start',
+    reelPasses(segs, 300).length, 1);
+  eq('a long video is split into passes',
+    reelPasses(Array.from({ length: 120 }, (_, i) => ({ start: i * 10, end: i * 10 + 10, text: 'x' })), 1200).length, 4);
+  eq('every segment lands in exactly one pass',
+    reelPasses(segs, 300).reduce((n, p) => n + p.length, 0), segs.length);
+  eq('the last pass reaches the end of the transcript',
+    (() => { const ps = reelPasses(segs, 300); return ps[ps.length - 1].slice(-1)[0].start; })(), 290);
+
+  eq('clip count scales with length but stays sane',
+    [reelCountFor(120), reelCountFor(1140), reelCountFor(7200)], [3, 10, 12]);
+  eq('timed transcript is budgeted',
+    timedTranscript([{ start: 5, text: 'hello' }, { start: 9, text: 'world' }], 12), '[5] hello');
 
   eq('format h:mm:ss', formatTime(4105), '1:08:25');
   eq('format m:ss', formatTime(323), '5:23');

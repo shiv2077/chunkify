@@ -1,0 +1,94 @@
+{
+  "_comment": "Single source for every model prompt and output schema. Read at runtime by cards.js and reels.js in the browser, and by eval_foundry.py on disk. Placeholders are {{name}}. Editing a prompt here changes the app and the evaluation together, which is the point: they used to be two copies that could drift apart.",
+
+  "generate": {
+    "system": "You write study flashcards from a transcript segment. Reply with JSON only, no prose.",
+    "user": "Section title: {{label}}\nTranscript segment:\n\"\"\"\n{{text}}\n\"\"\"\n\nWrite exactly {{count}} flashcards testing the substance of this segment.\n- An \"open\" card's prompt is a QUESTION ending in \"?\", answerable from memory in a sentence.\n- A \"cloze\" card's prompt is ONE short sentence (25 words maximum) with the key term replaced by ___. Never paste a paragraph.\n- Never restate the segment as the prompt. A prompt that is just a fact is useless.\n- Every answer must be stated in the segment. Never use outside knowledge.\n- \"quote\" must be copied verbatim from the segment and must contain the answer.\n- \"difficulty\" predicts how likely a student is to get this wrong on first recall: 0.0 nearly everyone recalls it, 1.0 nearly everyone fails. Spread the values; do not give every card the same number.\n- Do not write questions about the video itself, the speaker, or the format.",
+    "maxTokens": 2200,
+    "schemaName": "cards",
+    "schema": {
+      "type": "object",
+      "required": ["cards"],
+      "additionalProperties": false,
+      "properties": {
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "prompt", "answer", "difficulty", "quote"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string", "enum": ["open", "cloze"] },
+              "prompt": { "type": "string", "maxLength": 220 },
+              "answer": { "type": "string", "maxLength": 220 },
+              "difficulty": { "type": "number" },
+              "quote": { "type": "string", "maxLength": 320 }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "verify": {
+    "system": "You check study flashcards against their source segment. Reply with JSON only.",
+    "user": "Source segment:\n\"\"\"\n{{segment}}\n\"\"\"\n\nCard question: {{prompt}}\nCard answer: {{answer}}\n\nExisting cards already in this deck:\n{{existing}}\n\nanswerable: can the question be answered using only the segment above?\ngrounded: is the given answer actually stated in the segment, and correct?\nduplicate: does it test the same fact as one of the existing cards?\nreason: one short sentence explaining the call.",
+    "maxTokens": 300,
+    "schemaName": "verdict",
+    "schema": {
+      "type": "object",
+      "required": ["answerable", "grounded", "duplicate", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "answerable": { "type": "boolean" },
+        "grounded": { "type": "boolean" },
+        "duplicate": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    }
+  },
+
+  "grade": {
+    "system": "You grade a student's recalled answer against a reference answer. Reply with JSON only. 3 = the substance is correct and complete. 2 = partly right, or right but missing a key part. 1 = wrong, empty, or unrelated. Grade the substance, not the wording, spelling, or length.",
+    "user": "Question: {{prompt}}\nReference answer: {{answer}}\nSource segment: \"\"\"{{segment}}\"\"\"\n\nStudent's answer: \"\"\"{{typed}}\"\"\"\n\nreason: one short sentence, addressed to the student.",
+    "maxTokens": 250,
+    "schemaName": "grade",
+    "schema": {
+      "type": "object",
+      "required": ["rating", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "rating": { "type": "integer", "enum": [1, 2, 3] },
+        "reason": { "type": "string" }
+      }
+    }
+  },
+
+  "reels": {
+    "system": "You find the moments in a talk that stand on their own. Reply with JSON only, no prose.",
+    "user": "Video: {{title}}\nTranscript, one line per moment as [seconds] text:\n\"\"\"\n{{timed}}\n\"\"\"\n\nPick the {{count}} best short clips from this transcript.\n- A clip must make sense to someone who has watched nothing else. No clip may depend on a previous clip.\n- Prefer a complete idea: a definition, a surprising fact, a worked example, a punchline, a claim with its reason.\n- Skip intros, sponsor reads, housekeeping, and \"as I said earlier\" callbacks.\n- \"startSeconds\" and \"endSeconds\" must be real numbers taken from the [seconds] markers above. Start on the line that begins the thought and end on the line that finishes it.\n- Each clip must run between {{minSeconds}} and {{maxSeconds}} seconds. Never longer.\n- \"title\" is at most 8 words, concrete, and names the actual idea. Not \"An interesting point\".\n- \"hook\" is one sentence saying what the viewer learns. No hype, no questions.\n- Order the clips as they appear in the video.",
+    "maxTokens": 1600,
+    "schemaName": "reels",
+    "schema": {
+      "type": "object",
+      "required": ["clips"],
+      "additionalProperties": false,
+      "properties": {
+        "clips": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "hook", "startSeconds", "endSeconds"],
+            "additionalProperties": false,
+            "properties": {
+              "title": { "type": "string", "maxLength": 70 },
+              "hook": { "type": "string", "maxLength": 160 },
+              "startSeconds": { "type": "number" },
+              "endSeconds": { "type": "number" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

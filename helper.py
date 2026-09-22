@@ -155,8 +155,11 @@ def call_judge(body):
     if not isinstance(messages, list) or not messages:
         raise ValueError("Request needs a non-empty 'messages' list.")
 
+    # The helper owns which provider and model it talks to, because it owns the
+    # key that goes with them. A client naming a model it cannot authenticate
+    # for is how you get a request for gpt-4o-mini sent to a local server.
     payload = {
-        "model": body.get("model") or JUDGE_MODEL,
+        "model": JUDGE_MODEL,
         "messages": messages,
         "temperature": body.get("temperature", 0),
     }

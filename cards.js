@@ -16,7 +16,43 @@
    the same dueAt/reps/lastRating names as chunks, so scheduleReview() schedules
    a card without knowing it is one. */
 
-const CARD_SCHEMA_HINT = '{"cards":[{"type":"open"|"cloze","prompt":string,"answer":string,"difficulty":number,"quote":string}]}';
+/* Prompts and output schemas live in prompts.json, which eval_foundry.py reads
+   from disk. One file, two readers: a prompt cannot drift out of step with the
+   evaluation that is supposed to describe it. Loaded lazily so a fetch failure
+   breaks only the foundry, never app startup. */
+
+let promptsPromise = null;
+
+function prompts() {
+  if (promptsPromise) return promptsPromise;
+  promptsPromise = fetch('prompts.json')
+    .then((res) => {
+      if (!res.ok) throw new Error(`prompts.json returned ${res.status}`);
+      return res.json();
+    })
+    .catch((err) => {
+      promptsPromise = null; // let the next attempt retry
+      throw new Error(`Could not load prompts.json (${err.message})`);
+    });
+  return promptsPromise;
+}
+
+// {{name}} -> vars.name, for the templates in prompts.json
+function fillTemplate(tpl, vars) {
+  return String(tpl).replace(/\{\{(\w+)\}\}/g, (whole, key) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : whole);
+}
+
+// one prompts.json entry -> the arguments chatJson wants
+function promptCall(spec, vars, role) {
+  return {
+    messages: [
+      { role: 'system', content: spec.system },
+      { role: 'user', content: fillTemplate(spec.user, vars) },
+    ],
+    options: { role, maxTokens: spec.maxTokens, schema: spec.schema, schemaName: spec.schemaName },
+  };
+}
 
 /* ---------- transcript ---------- */
 
@@ -70,6 +106,22 @@ function spanForQuote(window, quote, fallbackStart, fallbackEnd) {
 
 /* ---------- generate ---------- */
 
+// Small models sometimes echo the quote into the prompt or answer text even
+// when the schema gives it its own field. Cut the echo rather than show it.
+function stripQuoteEcho(s) {
+  return String(s).replace(/\s*(?:quote|source)\s*[:=]\s*["'\u2018\u201c].*$/is, '').trim();
+}
+
+// The schema's maxLength is a hard cut, so a long answer can end mid-word.
+// Fall back to the last full sentence, else the last full word.
+function tidyTruncation(s, cap) {
+  if (s.length < cap - 4 || /[.!?]$/.test(s)) return s;
+  const sentence = Math.max(s.lastIndexOf('.'), s.lastIndexOf('!'), s.lastIndexOf('?'));
+  if (sentence > cap * 0.5) return s.slice(0, sentence + 1);
+  const word = s.lastIndexOf(' ');
+  return (word > cap * 0.5 ? s.slice(0, word) : s).replace(/[\s,;:]+$/, '') + '…';
+}
+
 function clamp01(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0.5;
@@ -80,76 +132,49 @@ function generateCandidates(chunk, window, count) {
   const text = windowText(window);
   if (text.trim().length < 80) return Promise.reject(new Error('Transcript for this section is too short to build cards from.'));
 
-  const messages = [
-    {
-      role: 'system',
-      content:
-        'You write study flashcards from a transcript segment. Reply with JSON only, no prose, ' +
-        `matching this shape: ${CARD_SCHEMA_HINT}`,
-    },
-    {
-      role: 'user',
-      content:
-        `Section title: ${chunk.label}\n` +
-        `Transcript segment:\n"""\n${text.slice(0, 6000)}\n"""\n\n` +
-        `Write exactly ${count} flashcards testing the substance of this segment.\n` +
-        '- Mix "open" cards (a question answered from memory) and "cloze" cards (a sentence with the key term replaced by ___).\n' +
-        '- Every answer must be stated in the segment. Never use outside knowledge.\n' +
-        '- "quote" must be copied verbatim from the segment and must contain the answer.\n' +
-        '- "difficulty" is your prediction of how likely a student is to get this wrong on first recall, from 0.0 (nearly everyone recalls it) to 1.0 (nearly everyone fails).\n' +
-        '- Do not write questions about the video itself, the speaker, or the format.',
-    },
-  ];
+  return prompts().then((p) => {
+    const { messages, options } = promptCall(p.generate, {
+      label: chunk.label, text: text.slice(0, 6000), count,
+    }, 'generate');
 
-  return chatJson(messages, { role: 'generate', maxTokens: 1400 }).then((reply) => {
-    const raw = Array.isArray(reply) ? reply : reply.cards;
-    if (!Array.isArray(raw)) throw new Error('Generator did not return a card list.');
-    return raw
-      .filter((c) => c && typeof c.prompt === 'string' && typeof c.answer === 'string' && c.prompt.trim() && c.answer.trim())
-      .slice(0, count)
-      .map((c) => ({
-        id: uid(),
-        type: c.type === 'cloze' ? 'cloze' : 'open',
-        prompt: c.prompt.trim(),
-        answer: c.answer.trim(),
-        difficulty: clamp01(c.difficulty),
-        source: spanForQuote(window, c.quote, chunk.startSeconds, chunk.endSeconds),
-        createdAt: Date.now(),
-        history: [],
-      }));
+    return chatJson(messages, options).then((reply) => {
+      const raw = Array.isArray(reply) ? reply : reply.cards;
+      if (!Array.isArray(raw)) throw new Error('Generator did not return a card list.');
+      return raw
+        .filter((c) => c && typeof c.prompt === 'string' && typeof c.answer === 'string' && stripQuoteEcho(c.prompt) && stripQuoteEcho(c.answer))
+        .slice(0, count)
+        .map((c) => ({
+          id: uid(),
+          type: c.type === 'cloze' ? 'cloze' : 'open',
+          prompt: tidyTruncation(stripQuoteEcho(c.prompt), 220),
+          answer: tidyTruncation(stripQuoteEcho(c.answer), 220),
+          difficulty: clamp01(c.difficulty),
+          source: spanForQuote(window, c.quote, chunk.startSeconds, chunk.endSeconds),
+          createdAt: Date.now(),
+          history: [],
+        }));
+    });
   });
 }
 
 /* ---------- verify ---------- */
 
 function verifyCandidate(card, segmentText, existingPrompts) {
-  const messages = [
-    {
-      role: 'system',
-      content:
-        'You check study flashcards against their source segment. Reply with JSON only: ' +
-        '{"answerable":boolean,"grounded":boolean,"duplicate":boolean,"reason":string}',
-    },
-    {
-      role: 'user',
-      content:
-        `Source segment:\n"""\n${segmentText.slice(0, 6000)}\n"""\n\n` +
-        `Card question: ${card.prompt}\n` +
-        `Card answer: ${card.answer}\n\n` +
-        `Existing cards already in this deck:\n${existingPrompts.length ? existingPrompts.map((p) => `- ${p}`).join('\n') : '(none)'}\n\n` +
-        'answerable: can the question be answered using only the segment above?\n' +
-        'grounded: is the given answer actually stated in the segment, and correct?\n' +
-        'duplicate: does it test the same fact as one of the existing cards?\n' +
-        'reason: one short sentence explaining the call.',
-    },
-  ];
+  return prompts().then((p) => {
+    const { messages, options } = promptCall(p.verify, {
+      segment: segmentText.slice(0, 6000),
+      prompt: card.prompt,
+      answer: card.answer,
+      existing: existingPrompts.length ? existingPrompts.map((x) => `- ${x}`).join('\n') : '(none)',
+    }, 'judge');
 
-  return chatJson(messages, { role: 'judge', maxTokens: 300 }).then((v) => ({
-    answerable: v.answerable === true,
-    grounded: v.grounded === true,
-    duplicate: v.duplicate === true,
-    reason: typeof v.reason === 'string' ? v.reason.trim() : '',
-  }));
+    return chatJson(messages, options).then((v) => ({
+      answerable: v.answerable === true,
+      grounded: v.grounded === true,
+      duplicate: v.duplicate === true,
+      reason: typeof v.reason === 'string' ? v.reason.trim() : '',
+    }));
+  });
 }
 
 function applyVerdict(card, checks) {
@@ -336,29 +361,18 @@ const RATING_WORD = { 1: 'Lost it', 2: 'Shaky', 3: 'Got it' };
 /* Grade a typed answer against the card's reference answer.
    Returns { rating, reason } — a suggestion the user accepts or overrides. */
 function gradeFreeRecall(card, typedAnswer) {
-  const messages = [
-    {
-      role: 'system',
-      content:
-        'You grade a student\'s recalled answer against a reference answer. Reply with JSON only: ' +
-        '{"rating":1|2|3,"reason":string}. 3 = the substance is correct and complete. ' +
-        '2 = partly right, or right but missing a key part. 1 = wrong, empty, or unrelated. ' +
-        'Grade the substance, not the wording, spelling, or length.',
-    },
-    {
-      role: 'user',
-      content:
-        `Question: ${card.prompt}\n` +
-        `Reference answer: ${card.answer}\n` +
-        `Source segment: """${(card.source && card.source.text ? card.source.text : '').slice(0, 2000)}"""\n\n` +
-        `Student's answer: """${String(typedAnswer).slice(0, 2000)}"""\n\n` +
-        'reason: one short sentence, addressed to the student.',
-    },
-  ];
+  return prompts().then((p) => {
+    const { messages, options } = promptCall(p.grade, {
+      prompt: card.prompt,
+      answer: card.answer,
+      segment: (card.source && card.source.text ? card.source.text : '').slice(0, 2000),
+      typed: String(typedAnswer).slice(0, 2000),
+    }, 'judge');
 
-  return chatJson(messages, { role: 'judge', maxTokens: 250 }).then((v) => {
-    const rating = [1, 2, 3].includes(Number(v.rating)) ? Number(v.rating) : 2;
-    return { rating, reason: typeof v.reason === 'string' ? v.reason.trim() : '' };
+    return chatJson(messages, options).then((v) => {
+      const rating = [1, 2, 3].includes(Number(v.rating)) ? Number(v.rating) : 2;
+      return { rating, reason: typeof v.reason === 'string' ? v.reason.trim() : '' };
+    });
   });
 }
 

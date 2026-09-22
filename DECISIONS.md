@@ -3,7 +3,7 @@
 Chunkify is a no-backend, localStorage single-page app served over `http://localhost:8934`.
 The card foundry adds model calls to it. These are the decisions that shaped how.
 
-Last updated 2026-09-19.
+Last updated 2026-09-22.
 
 ---
 
@@ -87,16 +87,21 @@ is low volume and decisive: it is the gate that decides what enters the review q
 whether an answer is grounded in a segment — a discrimination task where a weak model's errors pass
 straight through to the user's schedule.
 
-This machine has an RTX 3060 Laptop GPU with 6144 MiB of VRAM. That budget runs a small quantised
-model locally at usable speed. It does not run a model large enough to be trusted as the arbiter of
+This machine has an RTX 3060 Laptop GPU, of which 5.5 GiB is available for inference. That budget
+runs a small quantised model locally at usable speed: `qwen2.5:3b` occupies 1.9 GB and generates a
+section's worth of cards in seconds. It does not run a model large enough to be trusted as the arbiter of
 what is worth studying, and the judge would be competing for the same VRAM as the generator.
 
 ### Decision
 
-`role: "generate"` goes straight from the browser to a llama.cpp OpenAI-compatible server on
-`http://localhost:8080/v1`. `role: "judge"` goes through the helper to a hosted model, `gpt-4o-mini`
-by default. Both endpoints and both model names are settings. `llm.js` is the only file that knows
-which role goes where.
+`role: "generate"` goes straight from the browser to a local OpenAI-compatible server on
+`http://localhost:11434/v1`. That server is Ollama running `qwen2.5:3b`, installed under the user's
+home directory. `role: "judge"` goes through the helper to a hosted model, `gpt-4o-mini` by default.
+`llm.js` is the only file that knows which role goes where.
+
+Ollama is the local server rather than llama.cpp built from source because it installs without root,
+exposes the OpenAI-compatible route the app already speaks, and enforces a JSON schema as a decoding
+grammar, which ADR-006 depends on.
 
 ### Rejected alternative — run both roles on the local model
 
@@ -181,3 +186,157 @@ takes proportionally longer. Yield is below the number of cards requested, and t
 requested and verified is the number `eval_foundry.py` reports as generation yield and verification
 pass rate. Storing rejections makes a bad prompt visible as a pattern of stated reasons rather than
 as cards that quietly never appeared.
+
+---
+
+## ADR-006 — The output schema is enforced, not described
+
+**Status:** accepted
+
+### Context
+
+Every card carries a predicted difficulty and the transcript quote it came from. Difficulty is the
+input to the calibration measurement, and the quote is what resolves a card to a timestamp.
+
+A 3B model asked in prose for five fields returns the two or three it considers interesting. When
+`difficulty` is absent the parser substitutes 0.5, so every card gets an identical prediction, the
+reliability curve collapses to a single point, and the Brier score measures nothing. The failure is
+silent: cards still appear and still schedule.
+
+### Decision
+
+Generation, verification and grading each send a JSON schema in `response_format`, which the
+provider enforces as a decoding grammar rather than a request. The generation schema additionally
+bounds `prompt`, `answer` and `quote` with `maxLength`. Strings that hit the cap are trimmed back to
+the last complete sentence, or failing that the last complete word.
+
+### Rejected alternative — describe the shape in the prompt and validate afterwards
+
+Putting the shape in the system message costs nothing and works with any provider. It was rejected
+because validating afterwards only converts a silent wrong answer into a visible failed one: there
+is nothing useful to do with a card that came back without a difficulty except throw it away, and
+the model will omit the field again on the retry. Length was the sharper case. Told to keep a cloze
+to one short sentence, the model pasted whole paragraphs, overran the token limit, and returned JSON
+with no closing brace. Every section long enough to trigger it failed outright. Enforcing length in
+the grammar took generation yield from 66.7% to 100% across the same three sections.
+
+### Consequences
+
+The generation schema's length keywords reach only the local generator, because strict mode on
+hosted providers accepts a narrower subset. The verification and grading schemas stay within that
+subset so they can be judged by either. A reply that still arrives truncated now reports itself as
+cut off rather than as malformed JSON.
+
+---
+
+## ADR-007 — The helper chooses the judge model
+
+**Status:** accepted
+
+### Context
+
+ADR-001 puts the provider key in the helper. The model name travelled separately: it was a setting
+in the browser, sent with each request, and the helper used its own configured model only as a
+fallback.
+
+Those two facts contradict each other. The key determines which provider can be reached and
+therefore which models exist. A browser holding `gpt-4o-mini` in a settings field, pointed at a
+helper configured for a local provider, produces a request for a model that provider has never
+heard of. That is not hypothetical: it is what happened the first time the full pipeline ran, and
+every card in the batch was rejected with a 404 recorded as its verification reason.
+
+### Decision
+
+The helper uses its own `CHUNKIFY_JUDGE_MODEL` and ignores any model the client names. The browser
+sends messages and nothing else. The judge model input is gone from settings; the settings dialog
+reports the model the helper says it is using, read from `/health`.
+
+### Rejected alternative — keep the model in the browser and let the helper fall back
+
+Leaving it client-side lets the model change without restarting the helper, and settings already
+held the generator's model, so the two read symmetrically. The symmetry is false. The generator is
+keyless and local, so naming its model from the browser costs nothing if it is wrong — the request
+simply fails against a server the user controls. The judge is reached through a credential the
+browser cannot see, and a model name is only meaningful alongside that credential. Configuration
+that depends on the key belongs with the key.
+
+### Consequences
+
+Changing the judge model means an environment variable and a helper restart. The app cannot
+misreport which model judged a card, because it no longer holds an opinion about it.
+
+---
+
+## ADR-008 — Prompts live in one file that both readers load
+
+**Status:** accepted
+
+### Context
+
+The card foundry runs in the browser from `cards.js`. `eval_foundry.py` measures that foundry from
+the command line, in Python, and its whole purpose is to report what the app does. It began with its
+own copy of every prompt and schema, under a comment asking whoever edited one to edit the other.
+
+That comment is not a mechanism. The copies diverge the first time someone tunes a prompt in a hurry,
+and when they do the evaluation keeps producing confident numbers about a version of the foundry
+that no longer exists. A measurement tool that can silently describe the wrong thing is worse than
+none, because it is believed.
+
+### Decision
+
+`prompts.json` holds every system message, user template, token limit and output schema. The browser
+fetches it lazily, the first time a model call is made. `eval_foundry.py` reads it from disk at
+import. Templates use `{{name}}` placeholders, and both sides implement the same substitution.
+
+### Rejected alternative — generate the Python copy from the JavaScript one
+
+A small build step could have kept a generated file in sync and left `cards.js` as the single
+authored source. It was rejected because it adds a build step to an app whose defining property is
+that it has none: the file you edit is the file that runs. Generation also fails open. A stale
+generated file looks exactly like a fresh one, so the failure mode is the same silent divergence,
+merely with an extra command to forget to run.
+
+### Consequences
+
+A prompt change lands in the app and the evaluation at the same moment, with no step to remember.
+Card generation now depends on a second HTTP request, served from the same origin as the page, and a
+failure to load it reports itself and leaves the rest of the app working. The two substitution
+implementations are the remaining duplication; they are five lines each and covered by a test that
+renders every template in both and compares.
+
+---
+
+## ADR-009 — A reel is a time range, not a file
+
+**Status:** accepted
+
+### Context
+
+A long talk is hard to start. The same material as a stack of short, self-contained clips is easy,
+and that framing is what people already reach for. The obvious way to build it is the way every
+other tool does: download the video, cut it, crop it to 9:16, write out files.
+
+### Decision
+
+A reel is `{startSeconds, endSeconds}` plus a title and a one-line hook, stored on the video beside
+its sections. Playing one seeks a YouTube player to that range inside a 9:16 frame, which crops the
+sides in fill mode or letterboxes the whole frame in fit mode. The clip boundaries are snapped to
+transcript lines so a reel starts and ends on a sentence. The model proposes clips in passes of
+about five minutes, so its suggestions cover the whole video rather than the opening minutes.
+
+### Rejected alternative — download with yt-dlp and re-encode with ffmpeg
+
+Real files can be posted, sent and watched offline, and cropping could follow the speaker rather
+than the centre. It was rejected on every axis that matters here. It breaks the constraint the whole
+app is built on: no downloads, no media handling, no backend, which is what keeps this a page and a
+static server. It replaces a few bytes of JSON per clip with gigabytes on disk. It turns an instant
+operation into a long one with a progress bar and a failure mode. And it redistributes someone
+else's video, which streaming through the embedded player does not.
+
+### Consequences
+
+Reels cost nothing to store, appear as soon as the model answers, and keep the view count and the
+creator's attribution where they belong. They cannot be exported, shared as files, or watched
+offline. Cropping is a fixed centre cut, so a clip whose content sits at the edge of the frame is
+better watched in fit mode, which is one button. Reels are for consumption, not study: they carry no
+schedule, never enter the review queue, and do not count toward the daily focus goal.

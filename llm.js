@@ -16,8 +16,10 @@
 const LLM_DEFAULT_TIMEOUT_MS = 90000;
 
 function llmEndpoint(role) {
+  // No model for the judge: the helper picks it, because the helper holds the
+  // key that the model name has to be valid for.
   return role === 'judge'
-    ? { url: `${String(settings.helperBaseUrl).replace(/\/$/, '')}/judge`, model: settings.judgeModel }
+    ? { url: `${String(settings.helperBaseUrl).replace(/\/$/, '')}/judge`, model: null }
     : { url: `${String(settings.genBaseUrl).replace(/\/$/, '')}/chat/completions`, model: settings.genModel };
 }
 
@@ -43,10 +45,15 @@ function forgetHelperHealth() {
 }
 
 /* chat(messages, {role}) -> Promise<string> of the assistant's reply. */
-function chat(messages, { role = 'generate', temperature = 0, maxTokens = 700, json = false } = {}) {
+function chat(messages, { role = 'generate', temperature = 0, maxTokens = 700, json = false, schema = null, schemaName = 'reply' } = {}) {
   const { url, model } = llmEndpoint(role);
-  const body = { model, messages, temperature, max_tokens: maxTokens };
-  if (json) body.response_format = { type: 'json_object' };
+  const body = { messages, temperature, max_tokens: maxTokens };
+  if (model) body.model = model;
+  // A schema is worth the extra words: a small local model will otherwise drop
+  // optional-looking fields, and a missing difficulty silently becomes 0.5,
+  // which would quietly flatten every calibration measurement.
+  if (schema) body.response_format = { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema } };
+  else if (json) body.response_format = { type: 'json_object' };
 
   return fetch(url, {
     method: 'POST',
@@ -84,6 +91,9 @@ function parseJsonReply(text) {
   const start = body.search(/[[{]/);
   if (start === -1) throw new Error('Model reply contained no JSON');
   const end = Math.max(body.lastIndexOf(']'), body.lastIndexOf('}'));
+  // no closing bracket after the opening one means the reply stopped mid-JSON,
+  // which is a token limit, not malformed output. Say so.
+  if (end < start) throw new Error('Model reply was cut off before it finished — raise the token limit or ask for fewer cards');
   return JSON.parse(body.slice(start, end + 1));
 }
 

@@ -135,6 +135,12 @@
           </select>
         </div>
 
+        <div class="reels-bar">
+          <button id="reels-btn" class="secondary hidden">Make reels</button>
+          <button id="reels-redo" class="link-btn">Redo clips</button>
+          <span id="reels-status" class="cards-status"></span>
+        </div>
+
         <div id="chunk-setup" class="chunk-setup hidden">
           <h3>Set up sections</h3>
           <p id="autodetect-hint" class="hint hidden"></p>
@@ -177,6 +183,29 @@
   </section>
 
 </main>
+
+<!-- REELS -->
+<div id="reel-deck" class="reel-deck hidden">
+  <div class="reel-frame">
+    <div id="reel-stage" class="reel-stage">
+      <div id="reel-player"></div>
+      <div class="reel-progress"><div id="reel-bar"></div></div>
+      <div class="reel-caption">
+        <p id="reel-title" class="reel-title"></p>
+        <p id="reel-hook" class="reel-hook"></p>
+      </div>
+    </div>
+    <div class="reel-side">
+      <button id="reel-close" class="icon-btn big" title="Close (Esc)">&times;</button>
+      <span id="reel-pos" class="reel-pos"></span>
+      <button id="reel-prev" class="icon-btn big" title="Previous (up)">&#9650;</button>
+      <button id="reel-next" class="icon-btn big" title="Next (down)">&#9660;</button>
+      <button id="reel-fitfill" class="secondary reel-small">Fill</button>
+      <button id="reel-open-full" class="secondary reel-small" title="Open this moment in the full video">Open</button>
+      <div id="reel-dots" class="reel-dots"></div>
+    </div>
+  </div>
+</div>
 
 <!-- SETTINGS -->
 <dialog id="settings-dialog">
@@ -242,10 +271,6 @@
           <input id="set-gen-model" type="text" autocomplete="off" spellcheck="false">
         </label>
       </div>
-      <label class="field">
-        <span>Judge model <small>(key stays in the helper, never here)</small></span>
-        <input id="set-judge-model" type="text" autocomplete="off" spellcheck="false">
-      </label>
     </div>
 
     <div class="backup-block">
@@ -280,6 +305,7 @@
 
 <script src="llm.js" defer></script>
 <script src="cards.js" defer></script>
+<script src="reels.js" defer></script>
 <script src="backup.js" defer></script>
 <script src="app.js" defer></script>
 <!-- self-check for the parsing/chunking logic; only runs at index.html#test -->
