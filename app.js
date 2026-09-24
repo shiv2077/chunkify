@@ -375,6 +375,9 @@ function renderLibrary() {
     remainingSeconds += video.chunks.reduce((sum, c) => sum + (c.completed ? 0 : c.endSeconds - c.startSeconds), 0);
 
     card.className = 'library-card' + (total > 0 && completed === total ? ' done' : '');
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `Open ${video.title}`);
 
     const thumb = video.thumbnailUrl
       ? `<img class="thumb" src="${video.thumbnailUrl}" alt="" loading="lazy">`
@@ -385,21 +388,27 @@ function renderLibrary() {
       <div class="thumb-wrap">
         ${thumb}
         ${durationLabel ? `<span class="duration-pill">${durationLabel}</span>` : ''}
-        <button class="delete-btn icon-btn" title="Remove video">&times;</button>
+        <button class="delete-btn icon-btn" title="Remove video" aria-label="Remove video"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="card-body">
         <p class="card-title"></p>
         <div class="card-meta">
           <span>${total > 0 ? `${completed}/${total} sections` : 'no sections yet'}</span>
-          <span>${total > 0 ? (completed === total ? '&#10003; done' : `${pct}%`) : ''}</span>
+          <span>${total > 0 ? (completed === total ? 'done' : `${pct}%`) : ''}</span>
         </div>
         ${total > 0 ? `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
       </div>
     `;
     card.querySelector('.card-title').textContent = video.title;
+    card.querySelector('.delete-btn').setAttribute('aria-label', `Remove ${video.title}`);
 
     card.addEventListener('click', (e) => {
       if (e.target.closest('.delete-btn')) return;
+      openVideo(video.id);
+    });
+    card.addEventListener('keydown', (e) => {
+      if (e.target !== card || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
       openVideo(video.id);
     });
     card.querySelector('.delete-btn').addEventListener('click', () => {
@@ -763,10 +772,10 @@ function renderChunkList() {
           <div class="chunk-time">${formatTime(chunk.startSeconds)} &ndash; ${formatTime(chunk.endSeconds)} &middot; ${formatMinutes(chunk.endSeconds - chunk.startSeconds)}</div>
         </div>
         <div class="chunk-actions">
-          <button class="icon-btn cards-btn ${verifiedCards(chunk).length ? 'has-cards' : ''}" title="Cards">&#9632;</button>
-          <button class="icon-btn note-btn ${chunk.note ? 'has-note' : ''}" title="Notes">&#9776;</button>
-          <button class="icon-btn rename-btn" title="Rename">&#9998;</button>
-          <button class="icon-btn delete-chunk-btn" title="Delete">&times;</button>
+          <button class="icon-btn cards-btn ${verifiedCards(chunk).length ? 'has-cards' : ''}" title="Cards" aria-label="Cards"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v6H7zM7 14h10v6H7z"/></svg></button>
+          <button class="icon-btn note-btn ${chunk.note ? 'has-note' : ''}" title="Notes" aria-label="Notes"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM8 9h8M8 13h8"/></svg></button>
+          <button class="icon-btn rename-btn" title="Rename" aria-label="Rename"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.5 4 4M5 19l3.5-.8L18.7 8 16 5.3 5.8 15.5 5 19Z"/></svg></button>
+          <button class="icon-btn delete-chunk-btn" title="Delete" aria-label="Delete"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         </div>
       </div>
       <div class="chunk-note hidden"><textarea rows="3" placeholder="Notes for this section…"></textarea></div>

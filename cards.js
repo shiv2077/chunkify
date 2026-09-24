@@ -339,7 +339,7 @@ function renderChunkCards(wrap, video, chunk) {
 
     const del = document.createElement('button');
     del.className = 'icon-btn card-del';
-    del.textContent = '×';
+    del.innerHTML = '<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
     del.title = 'Delete card';
     del.addEventListener('click', (ev) => {
       ev.stopPropagation();

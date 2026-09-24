@@ -5,12 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chunkify — focused study playlists</title>
 <meta name="description" content="Turn long YouTube videos into short, finishable study sections.">
-<meta name="theme-color" content="#0b0b10">
+<meta name="theme-color" content="#17191b">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600;6..72,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -34,10 +37,10 @@
           <b id="today-minutes">0m</b>
           <small id="today-goal">of 60m today</small>
         </span>
-        <span class="streak" id="streak-badge" title="Day streak">&#128293; <b id="streak-count">0</b></span>
+        <span class="streak" id="streak-badge" title="Day streak"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22c4 0 7-2.7 7-6.6 0-2.5-1.4-4.3-3.7-6.6.1 2.2-1.1 3.5-2.5 4.1.5-3.5-1.4-6.8-4.7-9.9.2 3.5-2.1 5.6-3.1 8.2C3.7 14.6 5.8 22 12 22Z"/></svg><b id="streak-count">0</b></span>
       </div>
-      <button id="calibration-btn" class="icon-btn big" title="Calibration: predicted vs observed difficulty">&#128202;</button>
-      <button id="settings-btn" class="icon-btn big" title="Settings">&#9881;</button>
+      <button id="calibration-btn" class="icon-btn big" title="Calibration: predicted vs observed difficulty" aria-label="Calibration"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 16v-4M12 16V8M16 16V4"/></svg></button>
+      <button id="settings-btn" class="icon-btn big" title="Settings" aria-label="Settings"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="m19.4 13.5 1.1.9-2 3.4-1.3-.5a7.7 7.7 0 0 1-2.1 1.2l-.2 1.4h-3.8l-.2-1.4a7.7 7.7 0 0 1-2.1-1.2l-1.3.5-2-3.4 1.1-.9a7.8 7.8 0 0 1 0-2.4l-1.1-.9 2-3.4 1.3.5A7.7 7.7 0 0 1 11 6.1l.2-1.4H15l.2 1.4a7.7 7.7 0 0 1 2.1 1.2l1.3-.5 2 3.4-1.1.9a7.8 7.8 0 0 1-.1 2.4Z"/></svg></button>
     </div>
   </div>
 </header>
@@ -122,10 +125,10 @@
         </div>
 
         <div id="player-controls" class="player-controls hidden">
-          <button id="prev-btn" class="secondary" title="Previous section (&larr;)">&#9198;</button>
-          <button id="next-btn" class="secondary" title="Next section (&rarr;)">&#9197;</button>
-          <button id="complete-btn" title="Mark current section done (C)">&#10003; Done</button>
-          <button id="mark-chapter-btn" class="secondary" title="Split here">&#9998; Mark</button>
+          <button id="prev-btn" class="secondary icon-only" title="Previous section (&larr;)" aria-label="Previous section"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6M9 12h10"/></svg></button>
+          <button id="next-btn" class="secondary icon-only" title="Next section (&rarr;)" aria-label="Next section"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6M5 12h10"/></svg></button>
+          <button id="complete-btn" title="Mark current section done (C)"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.2 4.2L19 6.5"/></svg>Done</button>
+          <button id="mark-chapter-btn" class="secondary" title="Split here"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.5 4 4M5 19l3.5-.8L18.7 8 16 5.3 5.8 15.5 5 19Z"/></svg>Mark</button>
           <select id="speed-select" title="Playback speed">
             <option value="1">1&times;</option>
             <option value="1.25">1.25&times;</option>
@@ -196,10 +199,10 @@
       </div>
     </div>
     <div class="reel-side">
-      <button id="reel-close" class="icon-btn big" title="Close (Esc)">&times;</button>
+      <button id="reel-close" class="icon-btn big" title="Close (Esc)" aria-label="Close"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       <span id="reel-pos" class="reel-pos"></span>
-      <button id="reel-prev" class="icon-btn big" title="Previous (up)">&#9650;</button>
-      <button id="reel-next" class="icon-btn big" title="Next (down)">&#9660;</button>
+      <button id="reel-prev" class="icon-btn big" title="Previous (up)" aria-label="Previous reel"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg></button>
+      <button id="reel-next" class="icon-btn big" title="Next (down)" aria-label="Next reel"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 10 6 6 6-6"/></svg></button>
       <button id="reel-fitfill" class="secondary reel-small">Fill</button>
       <button id="reel-open-full" class="secondary reel-small" title="Open this moment in the full video">Open</button>
       <div id="reel-dots" class="reel-dots"></div>
